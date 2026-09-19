@@ -20,7 +20,10 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Quality Assurance",
 ]
-dependencies = ["keystones>=0.2"]
+dependencies = ["keystones>=0.2", "jinja2>=3.1"]
+
+[project.optional-dependencies]
+sqlglot = ["sqlglot>=27"]
 
 [project.urls]
 Homepage = "https://github.com/KyleJamesWalker/keystones-dbt"
@@ -29,13 +32,14 @@ Issues = "https://github.com/KyleJamesWalker/keystones-dbt/issues"
 # Until the preprocessor hook is released, keystones comes from the branch that
 # adds it. Revert to the published version once that lands.
 [tool.uv.sources]
-keystones = { git = "https://github.com/KyleJamesWalker/keystones", branch = "preprocessor-hook" }
+keystones = { git = "https://github.com/KyleJamesWalker/keystones", branch = "parser-hook" }
 
 [dependency-groups]
 dev = [
     "pytest>=8",
     "pre-commit>=4",
     "ruff==0.16.8",
+    "sqlglot>=27",
     "tree-sitter==0.26.0",
     "tree-sitter-language-pack==1.20.0",
 ]
