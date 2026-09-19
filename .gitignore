@@ -222,4 +222,4 @@ __marimo__/
 uv.lock
 
 # hatch-vcs generated
-src/keystones/_version.py
+src/keystones_dbt/_version.py
