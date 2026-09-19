@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "keystones-dbt"
+dynamic = ["version"]
+description = "Gate dbt models on their SQL, not on their rendered text"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Kyle James Walker" }]
+keywords = ["dbt", "keystones", "pre-commit", "code-review", "codeowners"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = ["keystones>=0.2"]
+
+[project.urls]
+Homepage = "https://github.com/KyleJamesWalker/keystones-dbt"
+Issues = "https://github.com/KyleJamesWalker/keystones-dbt/issues"
+
+# Until the preprocessor hook is released, keystones comes from the branch that
+# adds it. Revert to the published version once that lands.
+[tool.uv.sources]
+keystones = { git = "https://github.com/KyleJamesWalker/keystones", branch = "preprocessor-hook" }
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pre-commit>=4",
+    "ruff==0.16.8",
+    "tree-sitter==0.26.0",
+    "tree-sitter-language-pack==1.20.0",
+]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/keystones_dbt/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/keystones_dbt"]
+
+# Pins the public index so the ambient UV_INDEX_URL / PIP_INDEX_URL cannot reach
+# a lockfile. Removing this leaks an internal mirror host into uv.lock.
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+default = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,44 @@
+---
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --group dev --python ${{ matrix.python }}
+      - run: uv run --python ${{ matrix.python }} pytest -q
+
+  # The integration suite is the only thing that proves the mask actually feeds
+  # a parser, so it must not be the part that silently skips.
+  test-latest-grammars:
+    name: test (latest grammars)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --group dev --upgrade-package tree-sitter-language-pack
+      - run: uv run pytest -q
+
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --group dev
+      - run: uv run pre-commit run --all-files --show-diff-on-failure
