@@ -54,5 +54,5 @@ Gate those models on text instead, with a region:
 -- keystone:end
 ```
 
-Across a 740-model dbt project, 80.3% of models contain only `{{ }}`
-expressions and are handled here; 19.6% use control flow and need the region.
+Most models are only `{{ }}` expressions and are handled here. Models that
+branch or loop need the region.
