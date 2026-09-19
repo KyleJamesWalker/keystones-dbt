@@ -149,3 +149,128 @@ def test_a_refused_model_still_works_gated_on_text(project, run):
     )
     assert run("add", "--id", "rev-rec", "-m", "GAAP rev rec.") == 0
     assert run("check", "--all", "--no-base") == 0
+
+
+# --- the parser plugin, composed with the mask -------------------------------
+
+SNOWFLAKE_PYPROJECT = """[tool.keystones]
+root = "keystones"
+categories = ["default", "finance"]
+
+[[tool.keystones.language]]
+extensions = [".sql"]
+parser = { plugin = "keystones_dbt.parsers:sqlglot", dialect = "snowflake" }
+preprocessor = "keystones_dbt:preprocess"
+"""
+
+SNOWFLAKE_MODEL = """{{ config(materialized='incremental', unique_key='id') }}
+
+with
+-- keystone(finance): net
+net as (
+    select id, amount:cents::int * 0.97 as net
+    from {{ ref('orders') }}
+    qualify row_number() over (partition by id order by loaded_at desc) = 1
+)
+select * from net
+{% if is_incremental() %}
+where loaded_at > (select max(loaded_at) from {{ this }})
+{% endif %}
+"""
+
+
+@pytest.fixture
+def snowflake_project(project: Path) -> Path:
+    pytest.importorskip("sqlglot")
+    (project / "pyproject.toml").write_text(SNOWFLAKE_PYPROJECT)
+    model(project).write_text(SNOWFLAKE_MODEL)
+    return project
+
+
+def net_sidecar(project: Path) -> Path:
+    return project / "keystones" / "finance" / "net.md"
+
+
+def with_preprocessor_table(text: str) -> str:
+    return SNOWFLAKE_PYPROJECT.replace(
+        'preprocessor = "keystones_dbt:preprocess"',
+        'preprocessor = { plugin = "keystones_dbt:preprocess", ' + text + " }",
+    )
+
+
+def test_a_snowflake_model_resolves_to_a_cte(snowflake_project, run):
+    assert run("add", "--id", "net", "-m", "GAAP rev rec.") == 0
+    text = net_sidecar(snowflake_project).read_text()
+    assert 'target = "models/revenue.sql::net"' in text
+    assert 'hash = "dbt"' in text
+    assert "keystones-plugin/1+sqlglot@" in text
+    assert "/snowflake/" in text and "+dbt/1" in text
+
+
+def test_a_change_inside_the_cte_gates(snowflake_project, run):
+    run("add", "--id", "net", "-m", "x")
+    model(snowflake_project).write_text(SNOWFLAKE_MODEL.replace("0.97", "0.95"))
+    assert run("check", "--all", "--no-base") == 1
+
+
+def test_a_change_to_the_incremental_filter_does_not_gate_the_cte(
+    snowflake_project, run
+):
+    run("add", "--id", "net", "-m", "x")
+    model(snowflake_project).write_text(
+        SNOWFLAKE_MODEL.replace("loaded_at >", "loaded_at >=")
+    )
+    assert run("check", "--all", "--no-base") == 0
+
+
+def test_reformatting_and_uppercasing_do_not_gate(snowflake_project, run):
+    run("add", "--id", "net", "-m", "x")
+    model(snowflake_project).write_text(
+        SNOWFLAKE_MODEL.replace(
+            "select id, amount", "SELECT\n        id,\n        amount"
+        )
+    )
+    assert run("check", "--all", "--no-base") == 0
+
+
+def test_c5_catches_a_hand_edited_cte_sidecar(snowflake_project, run, capsys):
+    run("add", "--id", "net", "-m", "x")
+    path = net_sidecar(snowflake_project)
+    path.write_text(path.read_text().replace("0.97", "0.50"))
+    assert run("check", "--all", "--no-base") == 1
+    assert "[C5]" in capsys.readouterr().err
+
+
+def test_a_file_keystone_gates_config_and_the_filter(snowflake_project, run):
+    whole = SNOWFLAKE_MODEL.replace("-- keystone(finance): net\n", "").replace(
+        "{{ config(", "-- keystone(file, finance): whole\n{{ config(", 1
+    )
+    model(snowflake_project).write_text(whole)
+    assert run("add", "--id", "whole", "-m", "x") == 0
+    model(snowflake_project).write_text(
+        whole.replace("materialized='incremental'", "materialized='table'")
+    )
+    assert run("check", "--all", "--no-base") == 1
+
+
+def test_the_drop_policy_is_configured_in_pyproject(snowflake_project, run):
+    (snowflake_project / "pyproject.toml").write_text(
+        with_preprocessor_table('control_flow = "drop"')
+    )
+    assert run("add", "--id", "net", "-m", "x") == 0
+
+
+def test_a_bad_policy_is_a_config_error(snowflake_project, run, capsys):
+    (snowflake_project / "pyproject.toml").write_text(
+        with_preprocessor_table('control_flow = "guess"')
+    )
+    assert run("check", "--all", "--no-base") == 2
+    assert "control_flow" in capsys.readouterr().err
+
+
+def test_a_bad_dialect_is_a_config_error(snowflake_project, run, capsys):
+    (snowflake_project / "pyproject.toml").write_text(
+        SNOWFLAKE_PYPROJECT.replace('"snowflake"', '"not_a_db"')
+    )
+    assert run("check", "--all", "--no-base") == 2
+    assert "dialect" in capsys.readouterr().err
