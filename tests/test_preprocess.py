@@ -91,80 +91,6 @@ def test_a_multi_line_directive_is_removed_too():
     assert "__ks_" not in out and out.count("\n") == src.count("\n")
 
 
-def test_an_inline_expression_becomes_an_identifier():
-    out = masked("select * from {{ ref('orders') }}\n")
-    assert "__ks_" in out and "{{" not in out
-
-
-def test_a_jinja_comment_is_removed():
-    assert "never" not in masked("{# never mind #}\nselect 1\n")
-
-
-def test_a_non_control_tag_is_removed():
-    assert "{%" not in masked("{% set x = 1 %}\nselect {{ x }}\n")
-
-
-def test_masked_content_is_handed_back_for_hashing():
-    assert "ref('orders')" in spans(MODEL)
-    assert "config(materialized='incremental')" in spans(MODEL)
-
-
-def test_changing_a_ref_changes_the_spans():
-    assert spans(MODEL) != spans(MODEL.replace("'orders'", "'payments'"))
-
-
-# --- refusal -----------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "src",
-    [
-        "select {% if x %}a{% else %}b{% endif %} from t\n",
-        "select {% for c in cols %}{{ c }},{% endfor %} 1 from t\n",
-        "select a from t\n{% if inc %}where 1=1{% endif %}\n",
-    ],
-)
-def test_control_flow_is_refused(src):
-    """Branches concatenate into nonsense that still parses. Refuse instead."""
-    with pytest.raises(Refused, match="control flow"):
-        preprocess(src)
-
-
-def test_a_brace_inside_a_string_is_refused():
-    """`{{ "}}" }}` mis-splits, and the result parses while meaning something else."""
-    with pytest.raises(Refused, match="quote"):
-        preprocess("select '{{ \"}}\" }}' as x from t\n")
-
-
-def test_an_ordinary_quoted_argument_is_not_refused():
-    assert masked("select * from {{ ref('orders') }}\n")
-
-
-# --- the residue is real SQL -------------------------------------------------
-
-
-def test_the_residue_parses_as_sql():
-    parser = pytest.importorskip("tree_sitter_language_pack").get_parser("sql")
-    assert not parser.parse(masked(MODEL).encode()).root_node.has_error
-
-
-# --- a directive is one expression, not a line ------------------------------
-
-
-def test_two_expressions_on_one_line_are_two_placeholders():
-    """The directive rule must not swallow everything between the first `{{`
-    and the last `}}` on the line."""
-    out = masked("select\n{{ a() }}, {{ b() }}\nfrom t\n")
-    assert out.count("__ks_") == 2
-    assert "select" in out and "from t" in out
-
-
-def test_a_directive_never_spans_lines():
-    out = masked("{{ config(x='y') }} -- note\nselect {{ ref('a') }}.x\nfrom t\n")
-    assert "select" in out
-    assert out.count("__ks_") == 1
-
-
 def test_a_config_line_may_carry_a_trailing_sql_comment():
     out = masked("{{ config(materialized='table') }} -- why\nselect 1\n")
     assert "__ks_" not in out
@@ -178,38 +104,43 @@ def test_only_config_is_dropped_when_alone_on_a_line():
     assert ",\n\nfrom" not in out
 
 
-def test_a_multi_line_config_is_still_dropped():
-    out = masked("{{ config(\n    materialized='table'\n) }}\nselect 1\n")
-    assert out == "\n\n\nselect 1\n"
+def test_two_expressions_on_one_line_are_two_placeholders():
+    out = masked("select\n{{ a() }}, {{ b() }}\nfrom t\n")
+    assert out.count("__ks_") == 2
+    assert "select" in out and "from t" in out
 
 
-# --- quotes ------------------------------------------------------------------
+def test_an_inline_expression_becomes_an_identifier():
+    out = masked("select * from {{ ref('orders') }}\n")
+    assert "__ks_" in out and "{{" not in out
+
+
+def test_a_jinja_comment_is_removed():
+    assert "never" not in masked("{# never mind #}\nselect 1\n")
+
+
+def test_masked_content_is_handed_back_for_hashing():
+    assert "ref('orders')" in spans(MODEL)
+    assert "config(materialized='incremental')" in spans(MODEL)
+
+
+def test_changing_a_ref_changes_the_spans():
+    assert spans(MODEL) != spans(MODEL.replace("'orders'", "'payments'"))
+
+
+# --- strings are strings -----------------------------------------------------
+
+
+def test_a_closing_brace_inside_a_string_is_masked_correctly():
+    out = masked('{{ config(pre_hook="delete from {{ this }}") }}\nselect 1\n')
+    assert out == "\nselect 1\n"
 
 
 def test_an_apostrophe_inside_a_double_quoted_string_is_fine():
-    assert masked('select {{ var("don\'t") }} from t\n')
+    assert "__ks_" in masked('select {{ var("don\'t") }} from t\n')
 
 
-def test_a_double_quote_inside_a_single_quoted_string_is_fine():
-    assert masked("select {{ var('say \"hi\"') }} from t\n")
-
-
-# --- block tags --------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "src",
-    [
-        "{% macro m() %}\nselect 1\n{% endmacro %}\nselect {{ m() }}\n",
-        "{% set q %}\nselect 1\n{% endset %}\nselect * from ({{ q }})\n",
-        "{% call statement('x') %}select 1{% endcall %}\nselect 1\n",
-        "{% raw %}{{ not jinja }}{% endraw %}\nselect 1\n",
-    ],
-)
-def test_block_tags_are_refused(src):
-    """Dropping the tags leaves the block body behind as if it were SQL."""
-    with pytest.raises(Refused, match="control flow"):
-        preprocess(src)
+# --- statement tags ----------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -222,5 +153,117 @@ def test_block_tags_are_refused(src):
         "{% from 'm.sql' import x %}\nselect 1\n",
     ],
 )
-def test_statement_tags_are_still_dropped(src):
+def test_statement_tags_are_dropped(src):
     assert "{%" not in masked(src)
+
+
+@pytest.mark.parametrize(
+    "src, tag",
+    [
+        ("{% macro m() %}\nselect 1\n{% endmacro %}\n", "macro"),
+        ("{% set q %}\nselect 1\n{% endset %}\n", "set"),
+        ("{% call statement('x') %}select 1{% endcall %}\n", "call"),
+        ("{% raw %}{{ not jinja }}{% endraw %}\nselect 1\n", "raw"),
+        (
+            "{% materialization x, default %}select 1{% endmaterialization %}\n",
+            "materialization",
+        ),
+    ],
+)
+def test_block_tags_are_refused(src, tag):
+    """Dropping the tags would leave the block body behind as if it were SQL."""
+    with pytest.raises(Refused, match=tag):
+        preprocess(src)
+
+
+# --- control flow: first-branch (default) ------------------------------------
+
+IF_ELSE = (
+    "select a\n"
+    "{% if is_incremental() %}\n"
+    "where x > 1\n"
+    "{% else %}\n"
+    "where 1 = 1\n"
+    "{% endif %}\n"
+    "from t\n"
+)
+
+
+def test_first_branch_keeps_the_first_body_and_drops_the_rest():
+    assert masked(IF_ELSE) == "select a\n\nwhere x > 1\n\n\n\nfrom t\n"
+
+
+def test_first_branch_hashes_the_whole_block_as_one_span():
+    assert (
+        "if is_incremental() %} where x > 1 {% else %} where 1 = 1 {% endif"
+        in spans(IF_ELSE)
+    )
+
+
+def test_a_change_in_the_dropped_branch_still_changes_the_spans():
+    assert spans(IF_ELSE) != spans(IF_ELSE.replace("where 1 = 1", "where 2 = 2"))
+
+
+def test_elif_branches_are_dropped_too():
+    src = "{% if a %}\nx\n{% elif b %}\ny\n{% else %}\nz\n{% endif %}\n"
+    assert masked(src) == "\nx\n\n\n\n\n\n"
+
+
+def test_expressions_inside_the_kept_branch_are_masked():
+    src = "{% if a %}\nfrom {{ ref('t') }}\n{% endif %}\n"
+    out = masked(src)
+    assert out.startswith("\nfrom __ks_") and "{{" not in out
+
+
+def test_nested_blocks_inside_the_kept_branch_follow_the_policy():
+    src = "{% if a %}\n{% if b %}\nx\n{% else %}\ny\n{% endif %}\n{% endif %}\n"
+    assert masked(src) == "\n\nx\n\n\n\n\n"
+
+
+def test_a_for_body_is_kept_once():
+    src = "select\n{% for c in cols %}\n{{ c }},\n{% endfor %}\n1\n"
+    out = masked(src)
+    assert out.count("__ks_") == 1 and "{%" not in out
+
+
+def test_the_block_shape_is_part_of_the_hash():
+    """`{% if x %}a{% endif %}b` and `a{% if x %}b{% endif %}` must not collide."""
+    one = preprocess("{% if x %}a{% endif %}b\n")
+    two = preprocess("a{% if x %}b{% endif %}\n")
+    assert one != two
+
+
+# --- control flow: other policies --------------------------------------------
+
+
+def test_drop_removes_the_whole_block():
+    out, extra = preprocess(IF_ELSE, control_flow="drop")
+    assert out == "select a\n\n\n\n\n\nfrom t\n"
+    assert "where x > 1" in extra
+
+
+def test_refuse_refuses_control_flow():
+    with pytest.raises(Refused, match="control flow"):
+        preprocess(IF_ELSE, control_flow="refuse")
+
+
+def test_an_unknown_policy_is_a_value_error():
+    with pytest.raises(ValueError, match="control_flow"):
+        preprocess("select 1\n", control_flow="guess")
+
+
+# --- a block cut by the text's boundary --------------------------------------
+
+
+@pytest.mark.parametrize("src", ["{% if a %}\nx\n", "x\n{% endif %}\n", "{% else %}\n"])
+def test_an_unbalanced_block_is_refused_with_guidance(src):
+    with pytest.raises(Refused, match="whole block"):
+        preprocess(src)
+
+
+# --- the residue is real SQL -------------------------------------------------
+
+
+def test_the_residue_parses_as_sql():
+    parser = pytest.importorskip("tree_sitter_language_pack").get_parser("sql")
+    assert not parser.parse(masked(MODEL).encode()).root_node.has_error

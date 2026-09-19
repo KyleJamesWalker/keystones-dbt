@@ -116,7 +116,16 @@ def test_repadding_the_jinja_does_not_gate(project, run):
     assert run("check", "--all", "--no-base") == 0
 
 
-def test_a_control_flow_model_is_refused_with_guidance(project, run, capsys):
+def test_a_control_flow_model_is_refused_with_guidance_when_configured(
+    project, run, capsys
+):
+    (project / "pyproject.toml").write_text(
+        PYPROJECT.replace(
+            'preprocessor = "keystones_dbt:preprocess"',
+            'preprocessor = { plugin = "keystones_dbt:preprocess", '
+            'control_flow = "refuse" }',
+        )
+    )
     model(project).write_text(
         MODEL.replace(
             "from {{ ref('orders') }}",
