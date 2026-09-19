@@ -31,12 +31,16 @@ The dialect is yours to pick; this plugin never sees it.
 |---|---|
 | `{# comment #}` | removed |
 | `{{ config(...) }}` alone on a line | removed |
-| `{{ ref('orders') }}` inline | a placeholder derived from its content |
-| `{% set x = 1 %}` | removed |
-| `{% if %}`, `{% for %}` | **refused** |
+| any other `{{ ... }}` | a placeholder derived from its content |
+| `{% set x = 1 %}`, `{% do %}`, `{% import %}` | removed |
+| `{% if %}`, `{% for %}`, `{% macro %}`, any other block tag | **refused** |
 
 Masked content is hashed verbatim, so changing `ref('orders')` to
 `ref('payments')` trips the gate while reformatting the expression does not.
+
+A keystone hashes its own lines, so a node keystone on a CTE or view does not
+see the `config()` block above it. To gate materialization or partitioning,
+use `keystone(file)`.
 
 ## Why control flow is refused
 
@@ -55,4 +59,4 @@ Gate those models on text instead, with a region:
 ```
 
 Most models are only `{{ }}` expressions and are handled here. Models that
-branch or loop need the region.
+branch, loop, or define a macro or block need the region.

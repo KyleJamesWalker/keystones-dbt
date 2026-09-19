@@ -146,3 +146,81 @@ def test_an_ordinary_quoted_argument_is_not_refused():
 def test_the_residue_parses_as_sql():
     parser = pytest.importorskip("tree_sitter_language_pack").get_parser("sql")
     assert not parser.parse(masked(MODEL).encode()).root_node.has_error
+
+
+# --- a directive is one expression, not a line ------------------------------
+
+
+def test_two_expressions_on_one_line_are_two_placeholders():
+    """The directive rule must not swallow everything between the first `{{`
+    and the last `}}` on the line."""
+    out = masked("select\n{{ a() }}, {{ b() }}\nfrom t\n")
+    assert out.count("__ks_") == 2
+    assert "select" in out and "from t" in out
+
+
+def test_a_directive_never_spans_lines():
+    out = masked("{{ config(x='y') }} -- note\nselect {{ ref('a') }}.x\nfrom t\n")
+    assert "select" in out
+    assert out.count("__ks_") == 1
+
+
+def test_a_config_line_may_carry_a_trailing_sql_comment():
+    out = masked("{{ config(materialized='table') }} -- why\nselect 1\n")
+    assert "__ks_" not in out
+    assert "select 1" in out
+
+
+def test_only_config_is_dropped_when_alone_on_a_line():
+    """A macro emitting the last select column is a value, not a directive."""
+    out = masked("select\n    id,\n    {{ cents('amount') }}\nfrom t\n")
+    assert out.count("__ks_") == 1
+    assert ",\n\nfrom" not in out
+
+
+def test_a_multi_line_config_is_still_dropped():
+    out = masked("{{ config(\n    materialized='table'\n) }}\nselect 1\n")
+    assert out == "\n\n\nselect 1\n"
+
+
+# --- quotes ------------------------------------------------------------------
+
+
+def test_an_apostrophe_inside_a_double_quoted_string_is_fine():
+    assert masked('select {{ var("don\'t") }} from t\n')
+
+
+def test_a_double_quote_inside_a_single_quoted_string_is_fine():
+    assert masked("select {{ var('say \"hi\"') }} from t\n")
+
+
+# --- block tags --------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        "{% macro m() %}\nselect 1\n{% endmacro %}\nselect {{ m() }}\n",
+        "{% set q %}\nselect 1\n{% endset %}\nselect * from ({{ q }})\n",
+        "{% call statement('x') %}select 1{% endcall %}\nselect 1\n",
+        "{% raw %}{{ not jinja }}{% endraw %}\nselect 1\n",
+    ],
+)
+def test_block_tags_are_refused(src):
+    """Dropping the tags leaves the block body behind as if it were SQL."""
+    with pytest.raises(Refused, match="control flow"):
+        preprocess(src)
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        "{% set x = 1 %}\nselect {{ x }}\n",
+        "{%- set x = 1 -%}\nselect {{ x }}\n",
+        "{% do log('x') %}\nselect 1\n",
+        "{% import 'm.sql' as m %}\nselect 1\n",
+        "{% from 'm.sql' import x %}\nselect 1\n",
+    ],
+)
+def test_statement_tags_are_still_dropped(src):
+    assert "{%" not in masked(src)
