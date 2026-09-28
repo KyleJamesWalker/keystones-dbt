@@ -267,3 +267,12 @@ def test_an_unbalanced_block_is_refused_with_guidance(src):
 def test_the_residue_parses_as_sql():
     parser = pytest.importorskip("tree_sitter_language_pack").get_parser("sql")
     assert not parser.parse(masked(MODEL).encode()).root_node.has_error
+
+
+def test_config_with_a_space_before_the_paren_is_a_directive():
+    """`{{ config (materialized='view') }}` is a common spelling."""
+    from keystones_dbt import preprocess
+
+    masked, extra = preprocess("{{ config (materialized='view') }}\nSELECT 1 AS a\n")
+    assert masked.splitlines()[0].strip() == ""
+    assert "config" in extra

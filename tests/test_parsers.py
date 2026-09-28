@@ -123,3 +123,16 @@ def test_snowflake_syntax_the_generic_grammar_lacks_parses(snowflake):
         "qualify row_number() over (partition by ab order by n) = 1\n"
     )
     assert snowflake.parse(src).render(None)
+
+
+@pytest.mark.parametrize("tail", ["a IS NULL", "a = TRUE", "a = 1"])
+def test_a_cte_ending_in_a_keyword_literal_keeps_its_closing_paren(snowflake, tail):
+    """Keyword literals carry no position, so the extent stopped a line short
+    and the stored source lost its `)`, which C5 then could not parse."""
+    src = (
+        f"WITH c AS (\n  SELECT a\n  FROM t\n  WHERE {tail}\n),\n"
+        "o AS (SELECT 1 AS y)\nSELECT * FROM c\n"
+    )
+    defs = {d.qualname: d for d in snowflake.parse(src).definitions()}
+    assert (defs["c"].start, defs["c"].end) == (1, 5)
+    assert (defs["o"].start, defs["o"].end) == (6, 6)

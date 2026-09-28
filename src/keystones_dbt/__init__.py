@@ -9,6 +9,7 @@ back so it is still gated.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 
 from keystones.preprocess import Refused
@@ -88,7 +89,7 @@ def _unbalanced(block: Block) -> Refused:
 
 def _is_directive(src: str, block: Block) -> bool:
     """`config()` alone on its line sits where a statement belongs."""
-    if not block.body.startswith("config("):
+    if not re.match(r"config\s*\(", block.body):
         return False
     line_start = src.rfind("\n", 0, block.start) + 1
     line_end = src.find("\n", block.end)

@@ -60,6 +60,37 @@ class SqlglotParser:
         return tree
 
 
+def _matching_paren(src: str, opening: int) -> int:
+    """The offset of the `)` matching `src[opening]`, skipping strings and
+    comments; -1 when unbalanced."""
+    if opening == -1:
+        return -1
+    depth = 0
+    i = opening
+    while i < len(src):
+        ch = src[i]
+        if ch in ("'", '"'):
+            end = src.find(ch, i + 1)
+            i = len(src) if end == -1 else end + 1
+            continue
+        if src.startswith("--", i):
+            end = src.find("\n", i)
+            i = len(src) if end == -1 else end
+            continue
+        if src.startswith("/*", i):
+            end = src.find("*/", i)
+            i = len(src) if end == -1 else end + 2
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
+
+
 def _statements(src: str, dialect: str) -> list:
     import sqlglot as lib
     from sqlglot.errors import ParseError, TokenError
@@ -98,16 +129,25 @@ class _Tree:
         self._defs.sort(key=lambda pair: pair[0].start)
 
     def _span(self, node) -> tuple[int, int]:
+        from sqlglot import exp
+
         positions = [
-            (n.meta["line"], n.meta.get("end", 0))
+            (n.meta["line"], n.meta.get("start", 0), n.meta.get("end", 0))
             for n in node.walk()
             if n.meta and "line" in n.meta
         ]
         if not positions:
             raise Unparseable("a definition has no positioned tokens")
-        start = min(line for line, _ in positions)
-        end_line, end_offset = max(positions, key=lambda p: (p[0], p[1]))
-        # The closing parenthesis of a CTE is not a token the tree keeps.
+        start = min(line for line, _, _ in positions)
+        if isinstance(node, exp.CTE):
+            # Keyword literals such as NULL and TRUE carry no position, so the
+            # last positioned token can sit a line short. The CTE's own
+            # parentheses do not, so the extent is the matching `)`.
+            first = min(offset for _, offset, _ in positions)
+            close = _matching_paren(self.src, self.src.find("(", first))
+            if close != -1:
+                return start, self.src.count("\n", 0, close) + 1
+        end_line, _, end_offset = max(positions, key=lambda p: (p[0], p[2]))
         i = end_offset + 1
         while i < len(self.src) and self.src[i] in " \t\n)":
             if self.src[i] == ")":
