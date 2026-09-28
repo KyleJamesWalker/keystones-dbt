@@ -9,14 +9,15 @@ back so it is still gated.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 
 from keystones.preprocess import Refused
 
-from keystones_dbt._jinja import Block, blocks
+from keystones_dbt._jinja import Block, blocks, squeeze
 
 KEYSTONES_PREPROCESSOR_NAME = "dbt"
-KEYSTONES_PREPROCESSOR_VERSION = "1"
+KEYSTONES_PREPROCESSOR_VERSION = "2"
 
 POLICIES = ("first-branch", "drop", "refuse")
 
@@ -88,7 +89,7 @@ def _unbalanced(block: Block) -> Refused:
 
 def _is_directive(src: str, block: Block) -> bool:
     """`config()` alone on its line sits where a statement belongs."""
-    if not block.body.startswith("config("):
+    if not re.match(r"config\s*\(", block.body):
         return False
     line_start = src.rfind("\n", 0, block.start) + 1
     line_end = src.find("\n", block.end)
@@ -115,9 +116,12 @@ def preprocess(src: str, *, control_flow: str = "first-branch") -> tuple[str, st
             if node.kind == "comment":
                 cut(node.start, node.end)
                 return
-            spans.append(node.body)
+            # Whitespace between an expression's tokens is a formatter's;
+            # inside a string literal it is content, and `squeeze` keeps it.
+            text = squeeze(node.body) if node.kind == "expression" else node.body
+            spans.append(text)
             if node.kind == "expression" and not _is_directive(src, node):
-                cut(node.start, node.end, _placeholder(node.body))
+                cut(node.start, node.end, _placeholder(text))
             else:
                 cut(node.start, node.end)
             return

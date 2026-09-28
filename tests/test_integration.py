@@ -72,7 +72,7 @@ def test_the_sidecar_names_the_plugin(project, run):
     run("add", "--id", "net_revenue", "-m", "GAAP rev rec.")
     text = sidecar(project)
     assert 'hash = "dbt"' in text
-    assert "+dbt/1" in text
+    assert "+dbt/2" in text
 
 
 def test_a_sql_change_gates(project, run):
@@ -204,7 +204,7 @@ def test_a_snowflake_model_resolves_to_a_cte(snowflake_project, run):
     assert 'target = "models/revenue.sql::net"' in text
     assert 'hash = "dbt"' in text
     assert "keystones-plugin/1+sqlglot@" in text
-    assert "/snowflake/" in text and "+dbt/1" in text
+    assert "/snowflake/" in text and "+dbt/2" in text
 
 
 def test_a_change_inside_the_cte_gates(snowflake_project, run):

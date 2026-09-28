@@ -65,14 +65,11 @@ def test_padding_inside_the_braces_is_not_a_change():
     )
 
 
-def test_spacing_between_tokens_is_still_a_change():
-    """Deliberately conservative: normalising further needs a Jinja parser.
-
-    Collapsing all whitespace would equate var('my key') with var('mykey'), and
-    a gate that misses a change is worse than one that trips on a reformat.
-    """
-    assert preprocess("select {{ ref('o') }}\n") != preprocess(
-        "select {{ ref( 'o' ) }}\n"
+def test_spacing_inside_a_string_literal_is_still_a_change():
+    """Whitespace between tokens is a formatter's; inside a literal it is
+    content, so var('my key') and var('mykey') stay apart."""
+    assert preprocess("select {{ var('my key') }}\n") != preprocess(
+        "select {{ var('mykey') }}\n"
     )
 
 
@@ -267,3 +264,50 @@ def test_an_unbalanced_block_is_refused_with_guidance(src):
 def test_the_residue_parses_as_sql():
     parser = pytest.importorskip("tree_sitter_language_pack").get_parser("sql")
     assert not parser.parse(masked(MODEL).encode()).root_node.has_error
+
+
+def test_config_with_a_space_before_the_paren_is_a_directive():
+    """`{{ config (materialized='view') }}` is a common spelling."""
+    from keystones_dbt import preprocess
+
+    masked, extra = preprocess("{{ config (materialized='view') }}\nSELECT 1 AS a\n")
+    assert masked.splitlines()[0].strip() == ""
+    assert "config" in extra
+
+
+def test_whitespace_between_jinja_call_arguments_is_not_a_change():
+    """`source('a','b')` and `source('a', 'b')` are the same call."""
+    from keystones_dbt import preprocess
+
+    tight = preprocess("select * from {{ source('a','b') }}\n")
+    spaced = preprocess("select * from {{ source( 'a' , 'b' ) }}\n")
+    assert tight == spaced
+    inside = preprocess("select * from {{ source('a', 'b c') }}\n")
+    assert inside != spaced, "whitespace inside a string literal is content"
+
+
+def test_whitespace_inside_a_string_literal_is_content():
+    from keystones_dbt import preprocess
+
+    assert preprocess("select {{ var('a  b') }}\n") != preprocess(
+        "select {{ var('a b') }}\n"
+    )
+
+
+# A moved canary means the canonical form changed: bump the version with it.
+CANARY = "sha256:05d22bcfac66bb6548e3d19bd6bc82dc3e979a3efa75df4e505eb9f2ea294836"
+
+
+def test_pinned_preprocess_output():
+    import hashlib
+
+    from keystones_dbt import KEYSTONES_PREPROCESSOR_VERSION, preprocess
+
+    masked, extra = preprocess(
+        "{{ config(materialized='view') }}\nselect a from {{ source('s', 't') }}\n"
+        "{% if is_incremental() %}where x > 1{% endif %}\n"
+    )
+    digest = (
+        "sha256:" + hashlib.sha256((masked + "\n--\n" + extra).encode()).hexdigest()
+    )
+    assert (KEYSTONES_PREPROCESSOR_VERSION, digest) == ("2", CANARY), digest
