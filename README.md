@@ -25,6 +25,14 @@ parser       = { plugin = "keystones_dbt.parsers:sqlglot", dialect = "snowflake"
 preprocessor = { plugin = "keystones_dbt:preprocess", control_flow = "first-branch" }
 ```
 
+Then mark a CTE by hand with `-- keystone(finance): orders` and run
+`keystones add --id orders`, or let keystones write the marker:
+
+```bash
+keystones add models/revenue.sql::orders --id orders --category finance \
+    -m "GAAP revenue recognition"
+```
+
 `dialect` is any sqlglot knows: `snowflake`, `bigquery`, `redshift`,
 `databricks`, `postgres`, `duckdb` and more. Parsing is offline; nothing
 connects to a warehouse. Where the grammar pack has a grammar for your dialect
@@ -73,6 +81,11 @@ Refused models can always be gated on text with a region:
     amount * 0.97 as net_revenue
 -- keystone:end
 ```
+
+Whole-line `--` comments inside such a region are kept out of the semantic
+hash, so editing one is C4 and clears with `keystones fix` and no note. A repo
+that gated regions on keystones 0.3 runs `keystones migrate` once after
+upgrading, for any region that holds a comment.
 
 ## Macros
 
