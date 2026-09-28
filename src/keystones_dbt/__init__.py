@@ -17,7 +17,7 @@ from keystones.preprocess import Refused
 from keystones_dbt._jinja import Block, blocks, squeeze
 
 KEYSTONES_PREPROCESSOR_NAME = "dbt"
-KEYSTONES_PREPROCESSOR_VERSION = "1"
+KEYSTONES_PREPROCESSOR_VERSION = "2"
 
 POLICIES = ("first-branch", "drop", "refuse")
 

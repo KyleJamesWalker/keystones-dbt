@@ -106,6 +106,9 @@ def blocks(src: str) -> list[Block]:
 def _block(
     kind: str, src: str, start: int, end: int, inner_start: int, inner_end: int
 ) -> Block:
-    body = " ".join(src[inner_start:inner_end].strip("-").split())
+    raw = src[inner_start:inner_end].strip("-").strip()
+    # A statement's body is read for its tag; an expression's is hashed, and
+    # whitespace inside its string literals is content, so it stays as written.
+    body = " ".join(raw.split()) if kind == "statement" else raw
     tag = body.split(" ", 1)[0] if kind == "statement" and body else ""
     return Block(kind, start, end, body, tag)
