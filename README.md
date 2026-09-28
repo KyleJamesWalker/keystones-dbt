@@ -49,7 +49,8 @@ you may use `builtin = "sql_bigquery"` in place of `parser` and skip the extra.
 | `{% if %}`, `{% for %}` | governed by `control_flow`, below |
 | `{% macro %}`, block `{% set %}`, `{% call %}`, `{% raw %}`, other block tags | **refused** |
 
-Masked content is hashed verbatim, so changing `ref('orders')` to
+Masked content is hashed as written, whitespace between its tokens aside, so
+changing `ref('orders')` to
 `ref('payments')` trips the gate while reformatting the expression does not.
 
 A keystone hashes its own lines, so a node keystone on a CTE does not see the

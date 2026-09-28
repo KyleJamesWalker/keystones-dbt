@@ -65,14 +65,11 @@ def test_padding_inside_the_braces_is_not_a_change():
     )
 
 
-def test_spacing_between_tokens_is_still_a_change():
-    """Deliberately conservative: normalising further needs a Jinja parser.
-
-    Collapsing all whitespace would equate var('my key') with var('mykey'), and
-    a gate that misses a change is worse than one that trips on a reformat.
-    """
-    assert preprocess("select {{ ref('o') }}\n") != preprocess(
-        "select {{ ref( 'o' ) }}\n"
+def test_spacing_inside_a_string_literal_is_still_a_change():
+    """Whitespace between tokens is a formatter's; inside a literal it is
+    content, so var('my key') and var('mykey') stay apart."""
+    assert preprocess("select {{ var('my key') }}\n") != preprocess(
+        "select {{ var('mykey') }}\n"
     )
 
 
@@ -276,3 +273,14 @@ def test_config_with_a_space_before_the_paren_is_a_directive():
     masked, extra = preprocess("{{ config (materialized='view') }}\nSELECT 1 AS a\n")
     assert masked.splitlines()[0].strip() == ""
     assert "config" in extra
+
+
+def test_whitespace_between_jinja_call_arguments_is_not_a_change():
+    """`source('a','b')` and `source('a', 'b')` are the same call."""
+    from keystones_dbt import preprocess
+
+    tight = preprocess("select * from {{ source('a','b') }}\n")
+    spaced = preprocess("select * from {{ source( 'a' , 'b' ) }}\n")
+    assert tight == spaced
+    inside = preprocess("select * from {{ source('a', 'b c') }}\n")
+    assert inside != spaced, "whitespace inside a string literal is content"

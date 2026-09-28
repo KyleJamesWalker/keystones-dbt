@@ -16,6 +16,36 @@ from jinja2 import Environment
 from jinja2.ext import do, loopcontrols
 from keystones.preprocess import Refused
 
+
+def squeeze(text: str) -> str:
+    """Whitespace outside string literals collapses to what tokens need: one
+    space between two word characters, nothing anywhere else. Inside a literal
+    it is content."""
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch in ("'", '"'):
+            end = text.find(ch, i + 1)
+            end = len(text) if end == -1 else end + 1
+            out.append(text[i:end])
+            i = end
+            continue
+        if ch.isspace():
+            j = i
+            while j < len(text) and text[j].isspace():
+                j += 1
+            before = out[-1][-1] if out and out[-1] else ""
+            after = text[j] if j < len(text) else ""
+            if before.isalnum() and after.isalnum():
+                out.append(" ")
+            i = j
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out).strip()
+
+
 _ENV = Environment(extensions=[do, loopcontrols])
 
 _BEGIN = {
